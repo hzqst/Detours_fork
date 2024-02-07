@@ -16,7 +16,7 @@
 #error detours.h version mismatch
 #endif
 
-#define NOTHROW
+#define NOTHROW (std::nothrow)
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -1531,6 +1531,8 @@ struct DetourThread
 {
     DetourThread *      pNext;
     HANDLE              hThread;
+    BOOL                fNeedResume;
+    BOOL                fNeedClose;
 };
 
 struct DetourOperation
@@ -1646,7 +1648,11 @@ LONG WINAPI DetourTransactionAbort()
     // Resume any suspended threads.
     for (DetourThread *t = s_pPendingThreads; t != NULL;) {
         // There is nothing we can do if this fails.
-        ResumeThread(t->hThread);
+        if(t->fNeedResume)
+         ResumeThread(t->hThread);
+
+        if (t->fNeedClose)
+          CloseHandle(t->hThread);
 
         DetourThread *n = t->pNext;
         delete t;
@@ -1952,7 +1958,7 @@ typedef ULONG_PTR DETOURS_EIP_TYPE;
     return s_nPendingError;
 }
 
-LONG WINAPI DetourUpdateThread(_In_ HANDLE hThread)
+LONG WINAPI DetourUpdateThreadEx(_In_ HANDLE hThread, _In_ BOOL fNeedSuspend, _In_ BOOL fNeedResume, _In_ BOOL fNeedClose)
 {
     LONG error;
 
@@ -1966,10 +1972,10 @@ LONG WINAPI DetourUpdateThread(_In_ HANDLE hThread)
         return NO_ERROR;
     }
 
-    DetourThread *t = new NOTHROW DetourThread;
+    DetourThread* t = new NOTHROW DetourThread;
     if (t == NULL) {
         error = ERROR_NOT_ENOUGH_MEMORY;
-      fail:
+    fail:
         if (t != NULL) {
             delete t;
             t = NULL;
@@ -1980,17 +1986,27 @@ LONG WINAPI DetourUpdateThread(_In_ HANDLE hThread)
         return error;
     }
 
-    if (SuspendThread(hThread) == (DWORD)-1) {
-        error = GetLastError();
-        DETOUR_BREAK();
-        goto fail;
+    if (fNeedSuspend)
+    {
+        if (SuspendThread(hThread) == (DWORD)-1) {
+            error = GetLastError();
+            DETOUR_BREAK();
+            goto fail;
+        }
     }
 
     t->hThread = hThread;
     t->pNext = s_pPendingThreads;
+    t->fNeedResume = fNeedResume;
+    t->fNeedClose = fNeedClose;
     s_pPendingThreads = t;
 
     return NO_ERROR;
+}
+
+LONG WINAPI DetourUpdateThread(_In_ HANDLE hThread)
+{
+     return DetourUpdateThreadEx(hThread, TRUE, TRUE, FALSE);
 }
 
 ///////////////////////////////////////////////////////////// Transacted APIs.
