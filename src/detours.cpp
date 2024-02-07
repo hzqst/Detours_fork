@@ -1942,7 +1942,12 @@ typedef ULONG_PTR DETOURS_EIP_TYPE;
     // Resume any suspended threads.
     for (t = s_pPendingThreads; t != NULL;) {
         // There is nothing we can do if this fails.
-        ResumeThread(t->hThread);
+
+        if (t->fNeedResume)
+            ResumeThread(t->hThread);
+
+        if (t->fNeedClose)
+            CloseHandle(t->hThread);
 
         DetourThread *n = t->pNext;
         delete t;
@@ -1968,7 +1973,7 @@ LONG WINAPI DetourUpdateThreadEx(_In_ HANDLE hThread, _In_ BOOL fNeedSuspend, _I
     }
 
     // Silently (and safely) drop any attempt to suspend our own thread.
-    if (hThread == GetCurrentThread()) {
+    if (GetThreadId(hThread) == GetCurrentThreadId()) {
         return NO_ERROR;
     }
 
